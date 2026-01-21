@@ -4,53 +4,76 @@ import PyPDF2
 import os
 from datetime import datetime
 
-def get_mufg_url():
-    # 三菱UFJ: FX Daily
-    return "https://www.bk.mufg.jp/rept_mkt/gaitame/pdf/fxdaily.pdf"
+# --- 設定 ---
+LINE_TOKEN = os.environ.get("LINE_TOKEN")
+USER_ID = os.environ.get("USER_ID")
 
-def get_mizuho_url():
-    # みずほ: 外国為替ダイジェスト
-    return "https://www.mizuhobank.co.jp/market/pdf/daily/fxdigest.pdf"
-
-def get_smbc_url():
-    # 三井住友: 日付からURLを推測（例: 20260121.pdf）
-    today = datetime.now().strftime("%Y%m%d")
-    return f"https://www.smbc.co.jp/market/pdf/marketreport_{today}.pdf"
-
-def download_and_merge():
-    urls = [get_mufg_url(), get_mizuho_url(), get_smbc_url()]
-    merger = PyPDF2.PdfMerger()
-    files = []
+def get_pdf_urls():
+    urls = []
+    today_str = datetime.now().strftime("%Y%m%d") # 20260122形式
     
-    for i, url in enumerate(urls):
-        try:
-            r = requests.get(url, timeout=10)
-            if r.status_code == 200:
-                fname = f"tmp_{i}.pdf"
-                with open(fname, "wb") as f:
-                    f.write(r.content)
-                merger.append(fname)
-                files.append(fname)
-        except:
-            print(f"Skip: {url}")
-            
-    output = "Daily_Report.pdf"
-    merger.write(output)
-    merger.close()
-    return output
+    # 1. 三菱UFJ (固定URLが多い)
+    urls.append("https://www.bk.mufg.jp/rept_mkt/gaitame/pdf/fxdaily.pdf")
+    
+    # 2. みずほ銀行 (固定URL)
+    urls.append("https://www.mizuhobank.co.jp/market/pdf/daily/fxdigest.pdf")
+    
+    # 3. 三井住友銀行 (日付がURLに含まれる)
+    urls.append(f"https://www.smbc.co.jp/market/pdf/marketreport_{today_str}.pdf")
+    
+    # 4. りそな銀行 (HTMLページなので今回はテキストリンクとして扱うか、
+    # もしPDF版のURLが特定できれば追加。一旦は上記3つを優先)
+    
+    return urls
 
-def send_line_message(msg):
-    token = os.environ["LINE_TOKEN"]
-    user_id = os.environ["USER_ID"]
+def download_and_merge(pdf_urls):
+    merger = PyPDF2.PdfMerger()
+    downloaded_count = 0
+    
+    for i, url in enumerate(pdf_urls):
+        try:
+            res = requests.get(url, timeout=15)
+            if res.status_code == 200 and b'%PDF' in res.content[:100]:
+                filename = f"tmp_{i}.pdf"
+                with open(filename, "wb") as f:
+                    f.write(res.content)
+                merger.append(filename)
+                downloaded_count += 1
+                print(f"成功: {url}")
+            else:
+                print(f"取得失敗(PDFなし): {url}")
+        except Exception as e:
+            print(f"エラー: {url} - {e}")
+            
+    if downloaded_count > 0:
+        output_file = "Daily_Market_Report.pdf"
+        merger.write(output_file)
+        merger.close()
+        return output_file
+    return None
+
+def send_line_notification(file_path):
     url = "https://api.line.me/v2/bot/message/push"
-    headers = {"Content-Type": "application/json", "Authorization": f"Bearer {token}"}
-    payload = {"to": user_id, "messages": [{"type": "text", "text": msg}]}
+    headers = {
+        "Content-Type": "application/json",
+        "Authorization": f"Bearer {LINE_TOKEN}"
+    }
+    
+    # PDF本体を直接送るにはサーバーが必要なため、
+    # まずは「結合完了」の報告と、どの銀行が取れたかを送ります。
+    msg = f"【自動通知】{datetime.now().strftime('%m/%d')}のレポートをまとめました！\n"
+    msg += "※GitHubのActionsタブから成果物(Artifacts)をダウンロードできます。"
+    
+    payload = {
+        "to": USER_ID,
+        "messages": [{"type": "text", "text": msg}]
+    }
     requests.post(url, headers=headers, json=payload)
 
 if __name__ == "__main__":
-    try:
-        pdf_path = download_and_merge()
-        # 本来はPDFファイルを送信するが、まずは通知が届くかテスト
-        send_line_message("【自動通知】本日の為替レポートのまとめが完了しました。")
-    except Exception as e:
-        send_line_message(f"エラーが発生しました: {str(e)}")
+    urls = get_pdf_urls()
+    merged_pdf = download_and_merge(urls)
+    if merged_pdf:
+        send_line_notification(merged_pdf)
+    else:
+        print("PDFが一つも取得できませんでした。")
