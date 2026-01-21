@@ -1,0 +1,22 @@
+name: Daily Report Bot
+on:
+  schedule:
+    - cron: '0 1 * * *' # 日本時間10:00
+  workflow_dispatch: # これを入れると手動ボタンが出ます
+
+jobs:
+  run-script:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.9'
+      - name: Install dependencies
+        run: pip install requests
+      - name: Run Python Script
+        env:
+          LINE_TOKEN: ${{ secrets.LINE_TOKEN }}
+          USER_ID: ${{ secrets.USER_ID }}
+        run: python main.py
