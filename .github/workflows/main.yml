@@ -2,7 +2,7 @@ name: Daily Report Bot
 on:
   schedule:
     - cron: '0 1 * * *' # 日本時間10:00
-  workflow_dispatch: # これを入れると手動ボタンが出ます
+  workflow_dispatch: # 手動実行ボタン
 
 jobs:
   run-script:
@@ -14,7 +14,8 @@ jobs:
         with:
           python-version: '3.9'
       - name: Install dependencies
-        run: pip install requests
+        run: |
+          pip install requests beautifulsoup4 PyPDF2
       - name: Run Python Script
         env:
           LINE_TOKEN: ${{ secrets.LINE_TOKEN }}
