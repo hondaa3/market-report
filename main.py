@@ -75,14 +75,12 @@ def download_and_merge():
     return None
 
 def send_line_notification(msg):
+    # GitHubの実行結果画面へのURL（あなたのユーザー名とリポジトリ名に合わせてください）
+    artifact_url = "https://github.com/hondaa3/market-report/actions"
+    
+    full_msg = f"{msg}\n\n下記URLの最新の実行結果からPDFをダウンロードしてください：\n{artifact_url}"
+    
     url = "https://api.line.me/v2/bot/message/push"
     headers = {"Content-Type": "application/json", "Authorization": f"Bearer {LINE_TOKEN}"}
-    payload = {"to": USER_ID, "messages": [{"type": "text", "text": msg}]}
+    payload = {"to": USER_ID, "messages": [{"type": "text", "text": full_msg}]}
     requests.post(url, headers=headers, json=payload)
-
-if __name__ == "__main__":
-    merged_pdf = download_and_merge()
-    if merged_pdf:
-        send_line_notification("【完了】指定された銀行の最新レポートを抽出して結合しました。")
-    else:
-        send_line_notification("【報告】指定のキーワードに合致する最新PDFが見つかりませんでした。")
