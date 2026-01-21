@@ -24,7 +24,7 @@ def get_pdf_url(page_url, keywords):
             
             # キーワードのいずれかがリンクテキストまたはURLに含まれているか確認
             if any(k in link_text or k in link_href for k in keywords):
-                if link_href.endswith('.pdf'):
+                if link_href.lower().endswith('.pdf'):
                     return urljoin(page_url, link_href)
     except Exception as e:
         print(f"Error scanning {page_url}: {e}")
@@ -42,13 +42,13 @@ def download_and_merge():
     
     # ターゲット設定
     targets = [
-        # 三菱UFJ: "FX Daily" というテキストのリンク
+        # 三菱UFJ: "FX Daily" というテキスト
         {"name": "MUFG", "page": "https://www.bk.mufg.jp/rept_mkt/gaitame/index.html", "keys": ["FX Daily"]},
         # みずほ: "外国為替ダイジェスト" というテキスト
         {"name": "Mizuho", "page": "https://www.mizuhobank.co.jp/market/report.html", "keys": ["外国為替ダイジェスト"]},
-        # 三井住友: 当日または前日の日付(PDF 104KB)のような形式
+        # 三井住友: 日付形式 (当日または前日)
         {"name": "SMBC", "page": "https://www.smbc.co.jp/market/", "keys": [today.strftime("%Y年%m月%d日"), yesterday.strftime("%Y年%m月%d日")]},
-        # りそな: 2026年1月21日号 のような日付関連
+        # りそな: 日付形式
         {"name": "Resona", "page": "https://www.resonabank.co.jp/kojin/market/daily/index.html", "keys": [today.strftime("%m月%d日"), yesterday.strftime("%m月%d日"), "market_daily"]}
     ]
 
@@ -75,12 +75,27 @@ def download_and_merge():
     return None
 
 def send_line_notification(msg):
-    # GitHubの実行結果画面へのURL（あなたのユーザー名とリポジトリ名に合わせてください）
+    # あなたのリポジトリのActionsページURL
     artifact_url = "https://github.com/hondaa3/market-report/actions"
     
-    full_msg = f"{msg}\n\n下記URLの最新の実行結果からPDFをダウンロードしてください：\n{artifact_url}"
+    full_msg = f"{msg}\n\nPDFの表示・保存はこちら（最新の実行結果のArtifactsから）:\n{artifact_url}"
     
     url = "https://api.line.me/v2/bot/message/push"
-    headers = {"Content-Type": "application/json", "Authorization": f"Bearer {LINE_TOKEN}"}
-    payload = {"to": USER_ID, "messages": [{"type": "text", "text": full_msg}]}
-    requests.post(url, headers=headers, json=payload)
+    headers = {
+        "Content-Type": "application/json",
+        "Authorization": f"Bearer {LINE_TOKEN}"
+    }
+    payload = {
+        "to": USER_ID,
+        "messages": [{"type": "text", "text": full_msg}]
+    }
+    res = requests.post(url, headers=headers, json=payload)
+    print(f"LINE通知ステータス: {res.status_code}")
+
+# --- メイン処理の実行指示 ---
+if __name__ == "__main__":
+    merged_pdf_path = download_and_merge()
+    if merged_pdf_path:
+        send_line_notification("【完了】最新のマーケットレポートを1つのPDFにまとめました。")
+    else:
+        send_line_notification("【報告】対象サイトに最新のレポートPDFが見当たりませんでした。")
