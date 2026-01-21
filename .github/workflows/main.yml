@@ -1,8 +1,8 @@
 name: Daily Report Bot
 on:
   schedule:
-    - cron: '0 1 * * *' # 日本時間10:00
-  workflow_dispatch: # 手動実行ボタン
+    - cron: '15 1 * * *' # 日本時間10:15
+  workflow_dispatch:
 
 jobs:
   run-script:
@@ -14,10 +14,14 @@ jobs:
         with:
           python-version: '3.9'
       - name: Install dependencies
-        run: |
-          pip install requests beautifulsoup4 PyPDF2
+        run: pip install requests beautifulsoup4 PyPDF2
       - name: Run Python Script
         env:
           LINE_TOKEN: ${{ secrets.LINE_TOKEN }}
           USER_ID: ${{ secrets.USER_ID }}
         run: python main.py
+      - name: Upload Report # ここでPDFをGitHubに保存します
+        uses: actions/upload-artifact@v4
+        with:
+          name: Daily_Report_Folder
+          path: Daily_Market_Report.pdf
