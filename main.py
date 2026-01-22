@@ -14,7 +14,8 @@ def send_line_notification(msg):
     payload = {"to": USER_ID, "messages": [{"type": "text", "text": msg}]}
     requests.post(url, headers=headers, json=payload)
 
-def get_resona_final():
+def get_resona_url():
+    """りそな：iPhone偽装で最新PDFを取得"""
     headers = {"User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15"}
     url = "https://www.resonabank.co.jp/kojin/market/daily/index.html"
     try:
@@ -22,14 +23,14 @@ def get_resona_final():
         res.encoding = res.apparent_encoding
         soup = BeautifulSoup(res.text, 'html.parser')
         for a in soup.find_all('a', href=True):
-            href = a['href'].lower()
-            if "market_daily" in href and href.endswith('.pdf'):
+            if "market_daily" in a['href'].lower() and a['href'].endswith('.pdf'):
                 return urljoin(url, a['href'])
     except: pass
     return None
 
 def get_pdf_url(page_url, keywords, find_first_pdf=False):
-    headers = {"User-Agent": "Mozilla/5.0"}
+    """汎用（MUFG, みずほ, SMBC）"""
+    headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
     try:
         res = requests.get(page_url, headers=headers, timeout=20)
         res.encoding = res.apparent_encoding
@@ -44,29 +45,26 @@ def get_pdf_url(page_url, keywords, find_first_pdf=False):
 
 def process_reports():
     jst = timezone(timedelta(hours=9))
-    now = datetime.now(jst)
-    date_keys = [now.strftime("%Y%m%d"), now.strftime("%m%d")]
+    today = datetime.now(jst)
+    date_keys = [today.strftime("%Y%m%d"), today.strftime("%m%d")]
 
-    report_msg = f"【実験中：{now.strftime('%H:%M:%S')}】\n"
+    report_msg = f"【{today.strftime('%m/%d')} レポート速報】\n"
     found_any = False
 
-    # 各行の取得
     banks = {
         "三菱UFJ": get_pdf_url("https://www.bk.mufg.jp/rept_mkt/gaitame/index.html", ["FX Daily"]),
         "みずほ": get_pdf_url("https://www.mizuhobank.co.jp/market/report.html", [], find_first_pdf=True),
         "三井住友": get_pdf_url("https://www.smbc.co.jp/market/", date_keys),
-        "りそな": get_resona_final()
+        "りそな": get_resona_url()
     }
 
     for name, url in banks.items():
         if url:
-            report_msg += f"✅{name}\n"
+            report_msg += f"\n■{name}\n{url}\n"
             found_any = True
-        else:
-            report_msg += f"❌{name} (未発見)\n"
 
-    # 実験用：found_anyに関係なく必ず送る！
-    send_line_notification(report_msg)
+    if found_any:
+        send_line_notification(report_msg)
 
 if __name__ == "__main__":
     process_reports()
