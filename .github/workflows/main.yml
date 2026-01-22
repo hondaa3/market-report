@@ -1,10 +1,10 @@
-name: Market Report Experiment
+name: Market Report Daily
 
 on:
   schedule:
-    # 2分ごと（実際はGitHubの仕様で最短5〜10分間隔になることがあります）
-    - cron: '*/2 * * * *'
-  workflow_dispatch: # 手動実行ボタンも残しておきます
+    # 日本時間 10:15 (世界標準時 01:15)
+    - cron: '15 1 * * *'
+  workflow_dispatch: # 手動実行用
 
 jobs:
   run-script:
@@ -19,8 +19,7 @@ jobs:
           python-version: '3.9'
 
       - name: Install dependencies
-        run: |
-          pip install requests beautifulsoup4
+        run: pip install requests beautifulsoup4
 
       - name: Run script
         env:
