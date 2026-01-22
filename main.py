@@ -21,31 +21,38 @@ def send_line_notification(msg):
     res = requests.post(url, headers=headers, json=payload)
     print(f"LINE送信結果: {res.status_code}")
 
-def get_pdf_url(page_url, keywords, find_first_pdf=False):
-    """
-    find_first_pdf=True にすると、キーワードに拘らずそのページで最初に見つかったPDFを返す
-    (みずほ等、最新が一番上にあるサイト用)
-    """
+def get_resona_pdf(page_url):
+    """りそな専用：テーブル内の最初のPDFを抽出"""
     headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"}
     try:
         res = requests.get(page_url, headers=headers, timeout=20)
         res.encoding = res.apparent_encoding
         soup = BeautifulSoup(res.text, 'html.parser')
-        
+        # 最新号が入っているテーブル（sp-fmt01）を探す
+        table = soup.find('table', class_='sp-fmt01')
+        if table:
+            a = table.find('a', href=True)
+            if a and a['href'].lower().endswith('.pdf'):
+                return urljoin(page_url, a['href'])
+    except: pass
+    return None
+
+def get_pdf_url(page_url, keywords, find_first_pdf=False):
+    """汎用取得ロジック"""
+    headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"}
+    try:
+        res = requests.get(page_url, headers=headers, timeout=20)
+        res.encoding = res.apparent_encoding
+        soup = BeautifulSoup(res.text, 'html.parser')
         for a in soup.find_all('a', href=True):
             link_text = a.get_text(strip=True)
             link_href = a['href']
-            
-            # PDFリンクかチェック
             if link_href.lower().endswith('.pdf'):
-                # モード1: 最初のPDFを拾う (みずほ用)
                 if find_first_pdf:
                     return urljoin(page_url, link_href)
-                # モード2: キーワードで探す (MUFG, SMBC用)
                 if any(k in link_text or k in link_href for k in keywords):
                     return urljoin(page_url, link_href)
-    except Exception as e:
-        print(f"Error scanning {page_url}: {e}")
+    except: pass
     return None
 
 def process_reports():
@@ -53,7 +60,6 @@ def process_reports():
     today = datetime.now(jst)
     yesterday = today - timedelta(days=1)
     
-    # 検索キーワードのバリエーションを増やす
     date_keys = [
         today.strftime("%Y%m%d"), 
         today.strftime("%Y年%m月%d日"),
@@ -62,29 +68,38 @@ def process_reports():
         yesterday.strftime("%Y年%m月%d日")
     ]
 
-    targets = [
-        {"name": "三菱UFJ (FX Daily)", "page": "https://www.bk.mufg.jp/rept_mkt/gaitame/index.html", "keys": ["FX Daily"], "first": False},
-        {"name": "みずほ (為替)", "page": "https://www.mizuhobank.co.jp/market/report.html", "keys": [], "first": True},
-        {"name": "三井住友 (マーケット)", "page": "https://www.smbc.co.jp/market/", "keys": date_keys, "first": False},
-        {"name": "りそな (デイリー)", "page": "https://www.resonabank.co.jp/kojin/market/daily/index.html", "keys": ["market_daily"] + date_keys, "first": False}
-    ]
-
     report_msg = f"【{today.strftime('%m/%d')} レポート速報】\n"
     found_any = False
 
-    for target in targets:
-        pdf_url = get_pdf_url(target['page'], target['keys'], find_first_pdf=target['first'])
-        if pdf_url:
-            report_msg += f"\n■{target['name']}\n{pdf_url}\n"
-            found_any = True
-            print(f"成功: {target['name']}")
-        else:
-            print(f"未発見: {target['name']}")
+    # 各行の取得処理
+    # 1. MUFG
+    mufg = get_pdf_url("https://www.bk.mufg.jp/rept_mkt/gaitame/index.html", ["FX Daily"])
+    if mufg:
+        report_msg += f"\n■三菱UFJ (FX Daily)\n{mufg}\n"
+        found_any = True
+
+    # 2. みずほ
+    mizuho = get_pdf_url("https://www.mizuhobank.co.jp/market/report.html", [], find_first_pdf=True)
+    if mizuho:
+        report_msg += f"\n■みずほ (為替ダイジェスト)\n{mizuho}\n"
+        found_any = True
+
+    # 3. 三井住友
+    smbc = get_pdf_url("https://www.smbc.co.jp/market/", date_keys)
+    if smbc:
+        report_msg += f"\n■三井住友 (マーケット)\n{smbc}\n"
+        found_any = True
+
+    # 4. りそな (専用ロジック)
+    resona = get_resona_pdf("https://www.resonabank.co.jp/kojin/market/daily/index.html")
+    if resona:
+        report_msg += f"\n■りそな (デイリー)\n{resona}\n"
+        found_any = True
 
     if found_any:
         send_line_notification(report_msg)
     else:
-        send_line_notification("本日のレポートはまだ更新されていないか、見つかりませんでした。")
+        send_line_notification("レポートがまだ更新されていないようです。")
 
 if __name__ == "__main__":
     process_reports()
