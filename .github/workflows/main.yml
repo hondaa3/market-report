@@ -1,23 +1,28 @@
-name: Daily Report Bot
+name: Market Report Experiment
+
 on:
   schedule:
-    - cron: '15 1 * * *'
-  workflow_dispatch:
+    # 2分ごと（実際はGitHubの仕様で最短5〜10分間隔になることがあります）
+    - cron: '*/2 * * * *'
+  workflow_dispatch: # 手動実行ボタンも残しておきます
 
 jobs:
   run-script:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3
+      - name: Checkout code
+        uses: actions/checkout@v3
+
       - name: Set up Python
         uses: actions/setup-python@v4
         with:
           python-version: '3.9'
-      - name: Install system dependencies
-        run: sudo apt-get update && sudo apt-get install -y poppler-utils
-      - name: Install python dependencies
-        run: pip install requests beautifulsoup4 PyPDF2 pdf2image
-      - name: Run Python Script
+
+      - name: Install dependencies
+        run: |
+          pip install requests beautifulsoup4
+
+      - name: Run script
         env:
           LINE_TOKEN: ${{ secrets.LINE_TOKEN }}
           USER_ID: ${{ secrets.USER_ID }}
