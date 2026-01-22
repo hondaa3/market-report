@@ -1,7 +1,7 @@
 name: Daily Report Bot
 on:
   schedule:
-    - cron: '15 1 * * *' # 日本時間10:15
+    - cron: '15 1 * * *'
   workflow_dispatch:
 
 jobs:
@@ -14,14 +14,11 @@ jobs:
         with:
           python-version: '3.9'
       - name: Install dependencies
-        run: pip install requests beautifulsoup4 PyPDF2
+        run: pip install requests beautifulsoup4 PyPDF2 google-api-python-client google-auth-httplib2 google-auth-oauthlib
       - name: Run Python Script
         env:
           LINE_TOKEN: ${{ secrets.LINE_TOKEN }}
           USER_ID: ${{ secrets.USER_ID }}
+          GDRIVE_SERVICE_ACCOUNT: ${{ secrets.GDRIVE_SERVICE_ACCOUNT }}
+          GDRIVE_FOLDER_ID: ${{ secrets.GDRIVE_FOLDER_ID }}
         run: python main.py
-      - name: Upload Report # ここでPDFをGitHubに保存します
-        uses: actions/upload-artifact@v4
-        with:
-          name: Daily_Report_Folder
-          path: Daily_Market_Report.pdf
