@@ -29,15 +29,30 @@ def upload_to_drive(file_path):
         }
         media = MediaFileUpload(file_path, mimetype='application/pdf')
         
-        # アップロード実行
-        file = service.files().create(body=file_metadata, media_body=media, fields='id, webViewLink').execute()
+        # 【重要】supportsAllDrives=True を追加して容量エラーを回避
+        file = service.files().create(
+            body=file_metadata, 
+            media_body=media, 
+            fields='id, webViewLink',
+            supportsAllDrives=True 
+        ).execute()
+        
         file_id = file.get('id')
 
-        # 誰でも閲覧可能にする設定 (共有リンクを有効化)
-        service.permissions().create(fileId=file_id, body={'type': 'anyone', 'role': 'viewer'}).execute()
+        # 誰でも閲覧可能にする設定
+        service.permissions().create(
+            fileId=file_id, 
+            body={'type': 'anyone', 'role': 'viewer'},
+            supportsAllDrives=True
+        ).execute()
         
         # 共有用リンクを取得
-        res = service.files().get(fileId=file_id, fields='webViewLink').execute()
+        res = service.files().get(
+            fileId=file_id, 
+            fields='webViewLink',
+            supportsAllDrives=True
+        ).execute()
+        
         return res.get('webViewLink')
     except Exception as e:
         print(f"Gドライブアップロード失敗: {e}")
