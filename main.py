@@ -1,4 +1,5 @@
 import requests
+from bs4 import BeautifulSoup
 import os
 from urllib.parse import urljoin
 from datetime import datetime, timedelta, timezone
@@ -13,36 +14,34 @@ def send_line_notification(msg):
     payload = {"to": USER_ID, "messages": [{"type": "text", "text": msg}]}
     requests.post(url, headers=headers, json=payload)
 
-def check_url_exists(url):
-    """URLが実際に存在するか（PDFがあるか）確認する"""
-    headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
+def get_resona_final():
+    """りそな専用：スマホ用サイトに偽装して一番上のPDFを取得"""
+    # ユーザーエージェントをiPhoneに偽装
+    headers = {
+        "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1"
+    }
+    url = "https://www.resonabank.co.jp/kojin/market/daily/index.html"
     try:
-        response = requests.head(url, headers=headers, timeout=10)
-        return response.status_code == 200
-    except:
-        return False
-
-def get_resona_direct():
-    """りそな専用：URLの規則性から直接ファイルを特定する"""
-    jst = timezone(timedelta(hours=9))
-    now = datetime.now(jst)
-    
-    # 候補1: 今日 (例: 260122)
-    # 候補2: 昨日 (土日の場合などを考慮)
-    for i in range(3):
-        target_date = now - timedelta(days=i)
-        # りそなの命名規則: YYMMDD.pdf
-        file_name = target_date.strftime("%y%m%d") + ".pdf"
-        url = f"https://www.resonabank.co.jp/kojin/market/daily/pdf/{file_name}"
+        res = requests.get(url, headers=headers, timeout=20)
+        res.encoding = res.apparent_encoding
+        soup = BeautifulSoup(res.text, 'html.parser')
         
-        if check_url_exists(url):
-            return url
+        # ページ内のリンクを順番に見て、最初に見つかったPDFを最新と判定
+        for a in soup.find_all('a', href=True):
+            href = a['href'].lower()
+            # market_daily という文字が含まれるPDFリンクを探す
+            if "market_daily" in href and href.endswith('.pdf'):
+                return urljoin(url, a['href'])
+            # もし上記で見つからなければ、単純に最初のPDFを探す
+            if href.endswith('.pdf'):
+                return urljoin(url, a['href'])
+    except:
+        pass
     return None
 
 def get_pdf_url(page_url, keywords, find_first_pdf=False):
-    """汎用 (MUFG, みずほ, SMBC用)"""
-    from bs4 import BeautifulSoup
-    headers = {"User-Agent": "Mozilla/5.0"}
+    """汎用（MUFG, みずほ, SMBC用）"""
+    headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
     try:
         res = requests.get(page_url, headers=headers, timeout=20)
         res.encoding = res.apparent_encoding
@@ -81,16 +80,14 @@ def process_reports():
         report_msg += f"\n■三井住友\n{smbc}\n"
         found_any = True
 
-    # 4. りそな (直接アタック)
-    resona = get_resona_direct()
+    # 4. りそな (スマホ偽装・強制取得)
+    resona = get_resona_final()
     if resona:
         report_msg += f"\n■りそな\n{resona}\n"
         found_any = True
 
     if found_any:
         send_line_notification(report_msg)
-    else:
-        send_line_notification("レポートが更新されていません。")
 
 if __name__ == "__main__":
     process_reports()
