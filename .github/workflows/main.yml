@@ -13,12 +13,12 @@ jobs:
         uses: actions/setup-python@v4
         with:
           python-version: '3.9'
-      - name: Install dependencies
-        run: pip install requests beautifulsoup4 PyPDF2 google-api-python-client google-auth-httplib2 google-auth-oauthlib
+      - name: Install system dependencies
+        run: sudo apt-get update && sudo apt-get install -y poppler-utils
+      - name: Install python dependencies
+        run: pip install requests beautifulsoup4 PyPDF2 pdf2image
       - name: Run Python Script
         env:
           LINE_TOKEN: ${{ secrets.LINE_TOKEN }}
           USER_ID: ${{ secrets.USER_ID }}
-          GDRIVE_SERVICE_ACCOUNT: ${{ secrets.GDRIVE_SERVICE_ACCOUNT }}
-          GDRIVE_FOLDER_ID: ${{ secrets.GDRIVE_FOLDER_ID }}
         run: python main.py
