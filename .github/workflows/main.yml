@@ -2,9 +2,9 @@ name: Market Report Daily
 
 on:
   schedule:
-    # 日本時間 10:15 (世界標準時 01:15)
+    # 日本時間 10:15 (UTC 01:15)
     - cron: '15 1 * * *'
-  workflow_dispatch: # 手動実行用
+  workflow_dispatch: # これを残しておけば、いつでも手動でボタン実行できます
 
 jobs:
   run-script:
