@@ -8,63 +8,71 @@ from datetime import datetime, timedelta, timezone
 LINE_TOKEN = os.environ.get("LINE_TOKEN")
 USER_ID = os.environ.get("USER_ID")
 
-def send_line_notification(msg):
+def send_line(msg):
     url = "https://api.line.me/v2/bot/message/push"
     headers = {"Content-Type": "application/json", "Authorization": f"Bearer {LINE_TOKEN}"}
     payload = {"to": USER_ID, "messages": [{"type": "text", "text": msg}]}
     requests.post(url, headers=headers, json=payload)
 
-def get_resona_url():
-    """りそな：iPhone偽装で最新PDFを取得"""
-    headers = {"User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15"}
-    url = "https://www.resonabank.co.jp/kojin/market/daily/index.html"
+def test_smbc():
+    """三井住友の『日次更新』リンクを徹底捜索"""
+    url = "https://www.smbc.co.jp/market/"
     try:
-        res = requests.get(url, headers=headers, timeout=20)
+        res = requests.get(url, timeout=20)
         res.encoding = res.apparent_encoding
         soup = BeautifulSoup(res.text, 'html.parser')
-        for a in soup.find_all('a', href=True):
-            if "market_daily" in a['href'].lower() and a['href'].endswith('.pdf'):
-                return urljoin(url, a['href'])
-    except: pass
-    return None
+        
+        links = soup.find_all('a', href=True)
+        for a in links:
+            txt = a.get_text().strip()
+            # 「日次更新」という文字が入っているリンクをすべてチェック
+            if "日次更新" in txt:
+                pdf_url = urljoin(url, a['href'])
+                return f"✅発見: {txt}\n{pdf_url}"
+        return f"❌『日次更新』という文字のリンクが見つかりません (全{len(links)}件中)"
+    except Exception as e:
+        return f"⚠️通信エラー: {str(e)}"
 
-def get_pdf_url(page_url, keywords, find_first_pdf=False):
-    """汎用（MUFG, みずほ, SMBC）"""
-    headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
+def test_resona():
+    """りそなのURL直接アタックをテスト"""
+    jst = timezone(timedelta(hours=9))
+    date_str = datetime.now(jst).strftime("%y%m%d")
+    target = f"https://www.resonabank.co.jp/kojin/market/daily/pdf/{date_str}.pdf"
+    
     try:
-        res = requests.get(page_url, headers=headers, timeout=20)
-        res.encoding = res.apparent_encoding
+        res = requests.head(target, timeout=10, allow_redirects=True)
+        if res.status_code == 200:
+            return f"✅直接発見: {target}"
+        else:
+            return f"❌直接URLなし (Status:{res.status_code})\nURL: {target}"
+    except Exception as e:
+        return f"⚠️エラー: {str(e)}"
+
+def test_others(name, url, keyword=None, first=False):
+    """三菱・みずほの簡易テスト"""
+    try:
+        res = requests.get(url, timeout=20)
         soup = BeautifulSoup(res.text, 'html.parser')
         for a in soup.find_all('a', href=True):
-            if a['href'].lower().endswith('.pdf'):
-                if find_first_pdf: return urljoin(page_url, a['href'])
-                if any(k in a.get_text() or k in a['href'] for k in keywords):
-                    return urljoin(page_url, a['href'])
-    except: pass
-    return None
+            if a['href'].endswith('.pdf'):
+                if first or (keyword and keyword in a.get_text()):
+                    return f"✅発見: {urljoin(url, a['href'])}"
+        return "❌PDFリンクが見つかりません"
+    except:
+        return "⚠️サイトにアクセスできません"
 
 def process_reports():
     jst = timezone(timedelta(hours=9))
-    today = datetime.now(jst)
-    date_keys = [today.strftime("%Y%m%d"), today.strftime("%m%d")]
+    now = datetime.now(jst)
+    
+    msg = f"【接続テスト中：{now.strftime('%H:%M:%S')}】\n"
+    
+    msg += f"\n■三井住友 (日次狙い)\n{test_smbc()}\n"
+    msg += f"\n■りそな (URL直接狙い)\n{test_resona()}\n"
+    msg += f"\n■三菱UFJ\n{test_others('三菱', 'https://www.bk.mufg.jp/rept_mkt/gaitame/index.html', 'FX Daily')}\n"
+    msg += f"\n■みずほ\n{test_others('みずほ', 'https://www.mizuhobank.co.jp/market/report.html', first=True)}\n"
 
-    report_msg = f"【{today.strftime('%m/%d')} レポート速報】\n"
-    found_any = False
-
-    banks = {
-        "三菱UFJ": get_pdf_url("https://www.bk.mufg.jp/rept_mkt/gaitame/index.html", ["FX Daily"]),
-        "みずほ": get_pdf_url("https://www.mizuhobank.co.jp/market/report.html", [], find_first_pdf=True),
-        "三井住友": get_pdf_url("https://www.smbc.co.jp/market/", date_keys),
-        "りそな": get_resona_url()
-    }
-
-    for name, url in banks.items():
-        if url:
-            report_msg += f"\n■{name}\n{url}\n"
-            found_any = True
-
-    if found_any:
-        send_line_notification(report_msg)
+    send_line(msg)
 
 if __name__ == "__main__":
     process_reports()
