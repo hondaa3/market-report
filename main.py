@@ -1,7 +1,5 @@
 import requests
-from bs4 import BeautifulSoup
 import os
-import re
 from urllib.parse import urljoin
 from datetime import datetime, timedelta, timezone
 
@@ -15,55 +13,36 @@ def send_line_notification(msg):
     payload = {"to": USER_ID, "messages": [{"type": "text", "text": msg}]}
     requests.post(url, headers=headers, json=payload)
 
-def get_resona_ultra(page_url):
-    """りそな専用：日付が見つからなくてもPDFのURL規則性から抜き出す"""
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
-        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
-        "Accept-Language": "ja,en-US;q=0.7,en;q=0.3",
-    }
+def check_url_exists(url):
+    """URLが実際に存在するか（PDFがあるか）確認する"""
+    headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
     try:
-        res = requests.get(page_url, headers=headers, timeout=30)
-        res.encoding = res.apparent_encoding
-        soup = BeautifulSoup(res.text, 'html.parser')
-        
-        jst = timezone(timedelta(hours=9))
-        today = datetime.now(jst)
-        
-        # 探したいキーワード（日付のバリエーション）
-        date_patterns = [
-            today.strftime("%Y年%m月%d日"),
-            today.strftime("%-m月%-d日"), # 1月22日
-            today.strftime("%Y%m%d")      # 20260122
-        ]
+        response = requests.head(url, headers=headers, timeout=10)
+        return response.status_code == 200
+    except:
+        return False
 
-        # 1. まずは日付テキストを足がかりに探す
-        for dp in date_patterns:
-            target = soup.find(string=re.compile(dp))
-            if target:
-                print(f"DEBUG: りそな日付発見 -> {dp}")
-                curr = target.parent
-                for _ in range(5):
-                    nxt = curr.find_next('a', href=True)
-                    if nxt and nxt['href'].lower().endswith('.pdf'):
-                        return urljoin(page_url, nxt['href'])
-                    curr = curr.parent
-
-        # 2. ダメなら「market_daily」が含まれるPDFリンクをすべて取得して、最新（一番上）を出す
-        print("DEBUG: 日付で見つからないためURLパターンで検索します")
-        all_links = soup.find_all('a', href=True)
-        for a in all_links:
-            href = a['href'].lower()
-            if "market_daily" in href and href.endswith('.pdf'):
-                print(f"DEBUG: りそなURLパターン発見 -> {href}")
-                return urljoin(page_url, a['href'])
-                
-    except Exception as e:
-        print(f"DEBUG: りそな取得中にエラー -> {e}")
+def get_resona_direct():
+    """りそな専用：URLの規則性から直接ファイルを特定する"""
+    jst = timezone(timedelta(hours=9))
+    now = datetime.now(jst)
+    
+    # 候補1: 今日 (例: 260122)
+    # 候補2: 昨日 (土日の場合などを考慮)
+    for i in range(3):
+        target_date = now - timedelta(days=i)
+        # りそなの命名規則: YYMMDD.pdf
+        file_name = target_date.strftime("%y%m%d") + ".pdf"
+        url = f"https://www.resonabank.co.jp/kojin/market/daily/pdf/{file_name}"
+        
+        if check_url_exists(url):
+            return url
     return None
 
 def get_pdf_url(page_url, keywords, find_first_pdf=False):
-    headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
+    """汎用 (MUFG, みずほ, SMBC用)"""
+    from bs4 import BeautifulSoup
+    headers = {"User-Agent": "Mozilla/5.0"}
     try:
         res = requests.get(page_url, headers=headers, timeout=20)
         res.encoding = res.apparent_encoding
@@ -84,25 +63,34 @@ def process_reports():
     report_msg = f"【{today.strftime('%m/%d')} レポート速報】\n"
     found_any = False
 
-    # 各行の処理
-    results = {
-        "三菱UFJ": get_pdf_url("https://www.bk.mufg.jp/rept_mkt/gaitame/index.html", ["FX Daily"]),
-        "みずほ": get_pdf_url("https://www.mizuhobank.co.jp/market/report.html", [], find_first_pdf=True),
-        "三井住友": get_pdf_url("https://www.smbc.co.jp/market/", date_keys),
-        "りそな": get_resona_ultra("https://www.resonabank.co.jp/kojin/market/daily/index.html")
-    }
+    # 1. 三菱UFJ
+    mufg = get_pdf_url("https://www.bk.mufg.jp/rept_mkt/gaitame/index.html", ["FX Daily"])
+    if mufg:
+        report_msg += f"\n■三菱UFJ\n{mufg}\n"
+        found_any = True
 
-    for bank, url in results.items():
-        if url:
-            report_msg += f"\n■{bank}\n{url}\n"
-            found_any = True
-        else:
-            print(f"DEBUG: {bank} が見つかりませんでした")
+    # 2. みずほ
+    mizuho = get_pdf_url("https://www.mizuhobank.co.jp/market/report.html", [], find_first_pdf=True)
+    if mizuho:
+        report_msg += f"\n■みずほ\n{mizuho}\n"
+        found_any = True
+
+    # 3. 三井住友
+    smbc = get_pdf_url("https://www.smbc.co.jp/market/", date_keys)
+    if smbc:
+        report_msg += f"\n■三井住友\n{smbc}\n"
+        found_any = True
+
+    # 4. りそな (直接アタック)
+    resona = get_resona_direct()
+    if resona:
+        report_msg += f"\n■りそな\n{resona}\n"
+        found_any = True
 
     if found_any:
         send_line_notification(report_msg)
     else:
-        send_line_notification("本日のレポートはまだ見つかりません。")
+        send_line_notification("レポートが更新されていません。")
 
 if __name__ == "__main__":
     process_reports()
