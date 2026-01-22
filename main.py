@@ -14,9 +14,10 @@ LINE_TOKEN = os.environ.get("LINE_TOKEN")
 USER_ID = os.environ.get("USER_ID")
 GDRIVE_JSON = os.environ.get("GDRIVE_SERVICE_ACCOUNT")
 FOLDER_ID = os.environ.get("GDRIVE_FOLDER_ID")
+MY_EMAIL = "honkei1122@gmail.com" # あなたのメールアドレス
 
 def upload_to_drive(file_path):
-    """Googleドライブにアップロードして共有リンクを取得する"""
+    """Googleドライブにアップロードして、オーナー権限をあなたに移譲する"""
     try:
         scopes = ['https://www.googleapis.com/auth/drive']
         creds_dict = json.loads(GDRIVE_JSON)
@@ -29,7 +30,7 @@ def upload_to_drive(file_path):
         }
         media = MediaFileUpload(file_path, mimetype='application/pdf')
         
-        # 【重要】supportsAllDrives=True を追加して容量エラーを回避
+        # 1. アップロード実行
         file = service.files().create(
             body=file_metadata, 
             media_body=media, 
@@ -39,14 +40,24 @@ def upload_to_drive(file_path):
         
         file_id = file.get('id')
 
-        # 誰でも閲覧可能にする設定
-        service.permissions().create(
-            fileId=file_id, 
-            body={'type': 'anyone', 'role': 'viewer'},
-            supportsAllDrives=True
-        ).execute()
+        # 2. あなたをオーナーに設定（容量問題を解決するため、所有権をあなたに渡します）
+        try:
+            service.permissions().create(
+                fileId=file_id,
+                body={'type': 'user', 'role': 'owner', 'emailAddress': MY_EMAIL},
+                transferOwnership=True,
+                supportsAllDrives=True
+            ).execute()
+        except Exception as e:
+            print(f"オーナー移譲スキップ（通常共有に切り替え）: {e}")
+            # オーナー移譲が制限されている場合は閲覧権限だけ付与
+            service.permissions().create(
+                fileId=file_id, 
+                body={'type': 'anyone', 'role': 'viewer'},
+                supportsAllDrives=True
+            ).execute()
         
-        # 共有用リンクを取得
+        # 3. 共有用リンクを再取得
         res = service.files().get(
             fileId=file_id, 
             fields='webViewLink',
