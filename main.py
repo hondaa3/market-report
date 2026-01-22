@@ -16,37 +16,43 @@ def send_line(msg):
     requests.post(url, headers=headers, json=payload)
 
 def get_resona_url():
-    """りそな：過去の成功例に基づいたUser-Agentとリトライ"""
+    """りそな：Googlebotに偽装してリンクを取得"""
+    # 検索エンジンを装うことでブロックを回避
     headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+        "User-Agent": "Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)"
     }
-    # 1. ページを読みに行って最新リンクを探す
-    url = "https://www.resonabank.co.jp/kojin/market/daily/index.html"
+    base_url = "https://www.resonabank.co.jp/kojin/market/daily/index.html"
+    
     try:
-        res = requests.get(url, headers=headers, timeout=20)
+        # 1. サイトのHTMLから最新PDFリンクを探す
+        res = requests.get(base_url, headers=headers, timeout=25)
         if res.status_code == 200:
             res.encoding = res.apparent_encoding
             soup = BeautifulSoup(res.text, 'html.parser')
             for a in soup.find_all('a', href=True):
-                if "market_daily" in a['href'].lower() and a['href'].endswith('.pdf'):
-                    return urljoin(url, a['href'])
-    except: pass
+                href = a['href'].lower()
+                if "market_daily" in href and href.endswith('.pdf'):
+                    return urljoin(base_url, a['href'])
+    except Exception as e:
+        print(f"りそなアクセス失敗: {e}")
 
-    # 2. ダメならURLを直接生成して存在確認
+    # 2. ダメなら直接URLを生成して存在確認
     jst = timezone(timedelta(hours=9))
     date_str = datetime.now(jst).strftime("%y%m%d")
     direct_url = f"https://www.resonabank.co.jp/kojin/market/daily/pdf/{date_str}.pdf"
     try:
-        res = requests.head(direct_url, headers=headers, timeout=10)
-        if res.status_code == 200:
+        # HEADリクエストで存在確認
+        r = requests.head(direct_url, headers=headers, timeout=10)
+        if r.status_code == 200:
             return direct_url
-    except: pass
+    except:
+        pass
     return None
 
 def get_smbc_daily():
-    """三井住友：『日次更新』という文字のリンクを狙い撃ち"""
+    """三井住友：『日次更新』リンクを特定"""
     url = "https://www.smbc.co.jp/market/"
-    headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
+    headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
     try:
         res = requests.get(url, headers=headers, timeout=20)
         res.encoding = res.apparent_encoding
@@ -54,7 +60,8 @@ def get_smbc_daily():
         for a in soup.find_all('a', href=True):
             if "日次更新" in a.get_text() and a['href'].endswith('.pdf'):
                 return urljoin(url, a['href'])
-    except: pass
+    except:
+        pass
     return None
 
 def get_simple_pdf(page_url, keyword=None, first=False):
@@ -67,7 +74,8 @@ def get_simple_pdf(page_url, keyword=None, first=False):
             if a['href'].lower().endswith('.pdf'):
                 if first or (keyword and keyword in a.get_text()):
                     return urljoin(page_url, a['href'])
-    except: pass
+    except:
+        pass
     return None
 
 def process_reports():
@@ -91,6 +99,9 @@ def process_reports():
 
     if found_any:
         send_line(report_msg)
+    else:
+        # 何も見つからなかった場合、ログに出力
+        print("レポートが見つかりませんでした。")
 
 if __name__ == "__main__":
     process_reports()
