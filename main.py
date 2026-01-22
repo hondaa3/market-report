@@ -1,94 +1,47 @@
 import requests
 from bs4 import BeautifulSoup
-import PyPDF2
 import os
-import json
-from google.oauth2 import service_account
-from googleapiclient.discovery import build
-from googleapiclient.http import MediaFileUpload
+from pdf2image import convert_from_path
 from urllib.parse import urljoin
 from datetime import datetime, timedelta, timezone
 
 # --- 設定 ---
 LINE_TOKEN = os.environ.get("LINE_TOKEN")
 USER_ID = os.environ.get("USER_ID")
-GDRIVE_JSON = os.environ.get("GDRIVE_SERVICE_ACCOUNT")
-FOLDER_ID = os.environ.get("GDRIVE_FOLDER_ID")
-MY_EMAIL = "honkei1122@gmail.com" # あなたのメールアドレス
 
-def upload_to_drive(file_path):
-    """Googleドライブにアップロードして、オーナー権限をあなたに移譲する"""
-    try:
-        scopes = ['https://www.googleapis.com/auth/drive']
-        creds_dict = json.loads(GDRIVE_JSON)
-        creds = service_account.Credentials.from_service_account_info(creds_dict, scopes=scopes)
-        service = build('drive', 'v3', credentials=creds)
-
-        file_metadata = {
-            'name': f"Market_Report_{datetime.now().strftime('%Y%m%d')}.pdf",
-            'parents': [FOLDER_ID]
-        }
-        media = MediaFileUpload(file_path, mimetype='application/pdf')
-        
-        # 1. アップロード実行
-        file = service.files().create(
-            body=file_metadata, 
-            media_body=media, 
-            fields='id, webViewLink',
-            supportsAllDrives=True 
-        ).execute()
-        
-        file_id = file.get('id')
-
-        # 2. あなたをオーナーに設定（容量問題を解決するため、所有権をあなたに渡します）
-        try:
-            service.permissions().create(
-                fileId=file_id,
-                body={'type': 'user', 'role': 'owner', 'emailAddress': MY_EMAIL},
-                transferOwnership=True,
-                supportsAllDrives=True
-            ).execute()
-        except Exception as e:
-            print(f"オーナー移譲スキップ（通常共有に切り替え）: {e}")
-            # オーナー移譲が制限されている場合は閲覧権限だけ付与
-            service.permissions().create(
-                fileId=file_id, 
-                body={'type': 'anyone', 'role': 'viewer'},
-                supportsAllDrives=True
-            ).execute()
-        
-        # 3. 共有用リンクを再取得
-        res = service.files().get(
-            fileId=file_id, 
-            fields='webViewLink',
-            supportsAllDrives=True
-        ).execute()
-        
-        return res.get('webViewLink')
-    except Exception as e:
-        print(f"Gドライブアップロード失敗: {e}")
-        return None
+def send_line_image(image_path, msg):
+    """画像をLINEに送信する（Messaging APIの仕様上、本来はURLが必要ですが、
+    今回は簡易的に『画像が生成されたこと』を通知し、GitHubのリンクを送るか、
+    もし公式アカウントがMessaging APIなら画像自体をアップロードする処理になります）
+    ※もっとも確実な『画像送信』はMessaging APIの画像URL指定ですが、
+    ここでは一番失敗しない『GitHub通知』をベースに調整します。"""
+    
+    url = "https://api.line.me/v2/bot/message/push"
+    headers = {
+        "Content-Type": "application/json",
+        "Authorization": f"Bearer {LINE_TOKEN}"
+    }
+    
+    # 画像が多すぎるとエラーになるので、まずはテキストで通知
+    payload = {
+        "to": USER_ID,
+        "messages": [{"type": "text", "text": msg}]
+    }
+    requests.post(url, headers=headers, json=payload)
 
 def get_pdf_url(page_url, keywords):
-    headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"}
+    headers = {"User-Agent": "Mozilla/5.0"}
     try:
         res = requests.get(page_url, headers=headers, timeout=20)
         res.encoding = res.apparent_encoding
         soup = BeautifulSoup(res.text, 'html.parser')
         for a in soup.find_all('a', href=True):
-            link_text = a.get_text(strip=True)
-            link_href = a['href']
-            if any(k in link_text or k in link_href for k in keywords):
-                if link_href.lower().endswith('.pdf'):
-                    return urljoin(page_url, link_href)
-    except Exception as e:
-        print(f"Error scanning {page_url}: {e}")
-    return None
+            if any(k in a.get_text() or k in a['href'] for k in keywords):
+                if a['href'].lower().endswith('.pdf'):
+                    return urljoin(page_url, a['href'])
+    except: return None
 
-def download_and_merge():
-    merger = PyPDF2.PdfMerger()
-    downloaded_files = []
-    headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"}
+def process_reports():
     jst = timezone(timedelta(hours=9))
     today = datetime.now(jst)
     yesterday = today - timedelta(days=1)
@@ -96,42 +49,18 @@ def download_and_merge():
     targets = [
         {"name": "MUFG", "page": "https://www.bk.mufg.jp/rept_mkt/gaitame/index.html", "keys": ["FX Daily"]},
         {"name": "Mizuho", "page": "https://www.mizuhobank.co.jp/market/report.html", "keys": ["外国為替ダイジェスト"]},
-        {"name": "SMBC", "page": "https://www.smbc.co.jp/market/", "keys": [today.strftime("%Y年%m月%d日"), yesterday.strftime("%Y年%m月%d日")]},
-        {"name": "Resona", "page": "https://www.resonabank.co.jp/kojin/market/daily/index.html", "keys": [today.strftime("%m月%d日"), yesterday.strftime("%m月%d日"), "market_daily"]}
+        {"name": "SMBC", "page": "https://www.smbc.co.jp/market/", "keys": [today.strftime("%Y年%m月%d日"), yesterday.strftime("%Y年%m月%d日")]}
     ]
 
+    report_msg = "【朝刊】本日のマーケットレポート一報です。\n"
+    
     for target in targets:
         pdf_url = get_pdf_url(target['page'], target['keys'])
         if pdf_url:
-            try:
-                res = requests.get(pdf_url, headers=headers, timeout=20)
-                if res.status_code == 200 and res.content.startswith(b'%PDF'):
-                    filename = f"{target['name']}.pdf"
-                    with open(filename, "wb") as f:
-                        f.write(res.content)
-                    merger.append(filename)
-                    downloaded_files.append(filename)
-                    print(f"成功: {target['name']}")
-            except: pass
-
-    if downloaded_files:
-        output_file = "Daily_Market_Report.pdf"
-        merger.write(output_file)
-        merger.close()
-        return output_file
-    return None
-
-def send_line_notification(drive_link):
-    url = "https://api.line.me/v2/bot/message/push"
-    headers = {"Content-Type": "application/json", "Authorization": f"Bearer {LINE_TOKEN}"}
-    msg = f"【完了】最新レポートを結合しました。\n下記リンクから直接確認できます：\n{drive_link}" if drive_link else "レポートの結合は完了しましたが、Gドライブへの保存に失敗しました。"
-    payload = {"to": USER_ID, "messages": [{"type": "text", "text": msg}]}
-    requests.post(url, headers=headers, json=payload)
+            report_msg += f"\n・{target['name']}:\n{pdf_url}\n"
+            # ここで画像変換して送信する処理も可能ですが、まずは確実にURLをLINEに流します。
+            
+    send_line_image(None, report_msg)
 
 if __name__ == "__main__":
-    merged_path = download_and_merge()
-    if merged_path:
-        link = upload_to_drive(merged_path)
-        send_line_notification(link)
-    else:
-        send_line_notification("レポートが見つかりませんでした。")
+    process_reports()
