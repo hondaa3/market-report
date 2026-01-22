@@ -1,7 +1,6 @@
 import requests
 from bs4 import BeautifulSoup
 import os
-import time
 from urllib.parse import urljoin
 from datetime import datetime, timedelta, timezone
 
@@ -16,66 +15,58 @@ def send_line(msg):
     requests.post(url, headers=headers, json=payload)
 
 def get_resona_url():
-    """りそな：Googlebotに偽装してリンクを取得"""
-    # 検索エンジンを装うことでブロックを回避
-    headers = {
-        "User-Agent": "Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)"
-    }
-    base_url = "https://www.resonabank.co.jp/kojin/market/daily/index.html"
-    
-    try:
-        # 1. サイトのHTMLから最新PDFリンクを探す
-        res = requests.get(base_url, headers=headers, timeout=25)
-        if res.status_code == 200:
-            res.encoding = res.apparent_encoding
-            soup = BeautifulSoup(res.text, 'html.parser')
-            for a in soup.find_all('a', href=True):
-                href = a['href'].lower()
-                if "market_daily" in href and href.endswith('.pdf'):
-                    return urljoin(base_url, a['href'])
-    except Exception as e:
-        print(f"りそなアクセス失敗: {e}")
-
-    # 2. ダメなら直接URLを生成して存在確認
+    """りそな：西暦4桁の直撃URL ＋ HTML解析の2段構え"""
     jst = timezone(timedelta(hours=9))
-    date_str = datetime.now(jst).strftime("%y%m%d")
+    now = datetime.now(jst)
+    
+    # 形式: 20260122.pdf (HTMLから判明した新ルール)
+    date_str = now.strftime("%Y%m%d")
     direct_url = f"https://www.resonabank.co.jp/kojin/market/daily/pdf/{date_str}.pdf"
+    
+    headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
+    
+    # 1. 直接URLが存在するか確認（これが一番速くて確実）
     try:
-        # HEADリクエストで存在確認
-        r = requests.head(direct_url, headers=headers, timeout=10)
-        if r.status_code == 200:
+        res = requests.head(direct_url, headers=headers, timeout=10)
+        if res.status_code == 200:
             return direct_url
-    except:
-        pass
+    except: pass
+    
+    # 2. ダメならHTMLを解析（最新号ブロックを狙う）
+    try:
+        page_url = "https://www.resonabank.co.jp/kojin/market/daily/index.html"
+        res = requests.get(page_url, headers=headers, timeout=20)
+        soup = BeautifulSoup(res.text, 'html.parser')
+        # 「最新号」という文字の近くにあるPDFリンクを探す
+        for a in soup.find_all('a', href=True):
+            if "/pdf/" in a['href'] and a['href'].endswith('.pdf'):
+                return urljoin(page_url, a['href'])
+    except: pass
     return None
 
 def get_smbc_daily():
-    """三井住友：『日次更新』リンクを特定"""
+    """三井住友：『日次更新』リンク"""
     url = "https://www.smbc.co.jp/market/"
-    headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
     try:
-        res = requests.get(url, headers=headers, timeout=20)
+        res = requests.get(url, timeout=20)
         res.encoding = res.apparent_encoding
         soup = BeautifulSoup(res.text, 'html.parser')
         for a in soup.find_all('a', href=True):
             if "日次更新" in a.get_text() and a['href'].endswith('.pdf'):
                 return urljoin(url, a['href'])
-    except:
-        pass
+    except: pass
     return None
 
 def get_simple_pdf(page_url, keyword=None, first=False):
     """三菱UFJ・みずほ"""
-    headers = {"User-Agent": "Mozilla/5.0"}
     try:
-        res = requests.get(page_url, headers=headers, timeout=20)
+        res = requests.get(page_url, timeout=20)
         soup = BeautifulSoup(res.text, 'html.parser')
         for a in soup.find_all('a', href=True):
             if a['href'].lower().endswith('.pdf'):
                 if first or (keyword and keyword in a.get_text()):
                     return urljoin(page_url, a['href'])
-    except:
-        pass
+    except: pass
     return None
 
 def process_reports():
@@ -99,9 +90,6 @@ def process_reports():
 
     if found_any:
         send_line(report_msg)
-    else:
-        # 何も見つからなかった場合、ログに出力
-        print("レポートが見つかりませんでした。")
 
 if __name__ == "__main__":
     process_reports()
